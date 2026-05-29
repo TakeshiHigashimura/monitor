@@ -1,521 +1,143 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-
-<title>LOCAL ENVIRONMENT MONITOR</title>
-
-<script src="/chart.min.js"></script>
-
+<title>CLOUD MONITOR</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-
-html,body{
-  margin:0;
-  padding:0;
-  width:100%;
-  height:100%;
-  overflow:hidden;
-  font-family:Arial,sans-serif;
-  background:#f0f2f5;
-}
-
-/* =========================
-   HEADER
-========================= */
-
-.header{
-  width:100%;
-  height:70px;
-  background:#ffffff;
-  border-bottom:1px solid #ccc;
-
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-
-  box-sizing:border-box;
-  padding:10px 20px;
-}
-
-.title{
-  font-size:28px;
-  font-weight:bold;
-}
-
-.controls{
-  display:flex;
-  gap:10px;
-}
-
-button{
-  padding:8px 16px;
-  border:none;
-  border-radius:6px;
-  cursor:pointer;
-  font-size:14px;
-  background:#e0e0e0;
-}
-
-button.active{
-  background:#007bff;
-  color:#fff;
-}
-
-/* =========================
-   FILTER AREA
-========================= */
-
-.filter-area{
-  width:100%;
-  background:#fff;
-  padding:10px 20px;
-  box-sizing:border-box;
-  border-bottom:1px solid #ccc;
-
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-.filter-area input{
-  padding:5px;
-  font-size:14px;
-}
-
-/* =========================
-   CHART AREA
-========================= */
-
-.chart-wrapper{
-  width:100%;
-  height:58vh;
-  padding:10px;
-  box-sizing:border-box;
-}
-
-.chart-box{
-  width:100%;
-  height:100%;
-  background:#fff;
-  border:1px solid #ccc;
-  border-radius:8px;
-  padding:10px;
-  box-sizing:border-box;
-}
-
-/* =========================
-   TABLE AREA
-========================= */
-
-.table-wrapper{
-  width:100%;
-  height:28vh;
-  overflow:auto;
-  padding:10px;
-  box-sizing:border-box;
-}
-
-table{
-  width:100%;
-  border-collapse:collapse;
-  background:#fff;
-  table-layout:fixed;
-}
-
-thead th{
-  position:sticky;
-  top:0;
-  background:#eeeeee;
-  z-index:1;
-}
-
-th,td{
-  border:1px solid #444;
-  text-align:center;
-  padding:5px;
-  font-size:14px;
-}
-
-tr:nth-child(even){
-  background:#fafafa;
-}
-
-/* =========================
-   COLUMN WIDTH
-========================= */
-
-th:nth-child(1),td:nth-child(1){width:130px;}
-th:nth-child(2),td:nth-child(2){width:90px;}
-th:nth-child(3),td:nth-child(3){width:80px;}
-th:nth-child(4),td:nth-child(4){width:90px;}
-th:nth-child(5),td:nth-child(5){width:90px;}
-th:nth-child(6),td:nth-child(6){width:100px;}
-th:nth-child(7),td:nth-child(7){width:80px;}
-
+  html,body{margin:0;padding:0;height:100vh;overflow:hidden;font-family:sans-serif;background:#f0f2f5;}
+  .header-row{display:grid;grid-template-columns: 1.5fr 1fr 1.8fr; align-items:center; height:6vh; padding:0 15px; background:#fff; border-bottom:1px solid #ccc;}
+  h2{margin:0; font-size:24px; text-align:center;}
+  .filter-box{font-size:14px; display:flex; gap:5px;}
+  .filter-box input{font-size:14px; padding:2px; width:160px;}
+  .controls{text-align:right; display:flex; align-items:center; justify-content:flex-end; gap:3px;}
+  .mode-divider{width:1px; height:20px; background:#ccc; margin:0 8px;}
+  button{margin:0 3px;padding:6px 15px;font-size:14px;cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:4px;transition:0.2s;}
+  button.active{background:#007bff;color:#fff;border-color:#0056b3;}
+  #chart-container{position:relative; width:99vw; height:70vh; background:#fff; margin:5px auto; padding:10px; box-sizing:border-box; border:1px solid #ddd; border-radius:8px;}
+  .table-outer{width:100%; display:flex; justify-content:center;}
+  .table-wrapper{width:60%; height:22vh; overflow-y:auto; background:#fff; border:1px solid #333; border-radius:4px;}
+  table{border-collapse:collapse; width:100%; table-layout:fixed;}
+  thead th{position:sticky; top:0; background:#eee; z-index:1; border:1px solid #333; padding:4px;}
+  td{border:1px solid #333; padding:3px; text-align:center; font-size:16px; height:35px;}
 </style>
 </head>
-
 <body>
-
-<!-- =========================
-     HEADER
-========================= -->
-
-<div class="header">
-
-  <div class="title">
-    ローカル環境モニター
-  </div>
-
+<div class="header-row">
+  <div class="filter-box">開始:<input type="datetime-local" id="start"> ～ 終了:<input type="datetime-local" id="end"><button onclick="applyFilter()" style="background:#28a745;color:white;border:none;">適用</button></div>
+  <h2>クラウド環境モニター</h2>
   <div class="controls">
-    <button id="btn_temp" onclick="changeType('temp')">
-      温度(℃)
-    </button>
-
-    <button id="btn_hum" onclick="changeType('hum')">
-      湿度(%)
-    </button>
-
-    <button id="btn_pres" onclick="changeType('pres')">
-      気圧(hPa)
-    </button>
+    <button id="btn_temp" onclick="changeType('temp')">温度(℃)</button>
+    <button id="btn_hum" onclick="changeType('hum')">湿度(%)</button>
+    <button id="btn_pres" onclick="changeType('pres')">気圧(hPa)</button>
+    <div class="mode-divider"></div>
+    <button id="btn_mode" onclick="toggleMode()" style="background:#f8f9fa; font-weight:bold; border-color:#6c757d;">モード: 自動</button>
   </div>
-
 </div>
-
-<!-- =========================
-     FILTER
-========================= -->
-
-<div class="filter-area">
-
-  開始:
-
-  <input type="datetime-local" id="start">
-
-  終了:
-
-  <input type="datetime-local" id="end">
-
-  <button onclick="applyFilter()"
-          style="background:#28a745;color:white;">
-    適用
-  </button>
-
-</div>
-
-<!-- =========================
-     CHART
-========================= -->
-
-<div class="chart-wrapper">
-
-  <div class="chart-box">
-
-    <canvas id="chart"></canvas>
-
-  </div>
-
-</div>
-
-<!-- =========================
-     TABLE
-========================= -->
-
-<div class="table-wrapper">
-
-<table>
-
-<thead>
-<tr>
-  <th>Date</th>
-  <th>Time</th>
-  <th>Device</th>
-  <th>Temp(℃)</th>
-  <th>Hum(%)</th>
-  <th>Pres(hPa)</th>
-  <th>RSSI</th>
-</tr>
-</thead>
-
-<tbody id="tbl">
-</tbody>
-
-</table>
-
-</div>
+<div id="chart-container"><canvas id="chart"></canvas></div>
+<div class="table-outer"><div class="table-wrapper"><table><thead><tr><th>Date</th><th>Time</th><th>Device</th><th>Temp</th><th>Hum</th><th>Pres</th><th>RSSI</th></tr></thead><tbody id="tbl"></tbody></table></div></div>
 
 <script>
-
-/* ==========================================
-   GLOBAL
-========================================== */
-
-let chart = null;
-let currentType = 'temp';
-let fullData = [];
-
-/* ==========================================
-   DEVICE COLOR
-========================================== */
-
-function getColor(dev){
-
-  let hash = 0;
-
-  for(let i=0;i<dev.length;i++){
-    hash = dev.charCodeAt(i) +
-           ((hash << 5) - hash);
-  }
-
-  return `hsl(${Math.abs(hash)%360},70%,50%)`;
-}
-
-/* ==========================================
-   PARSE TIMESTAMP
-========================================== */
-
-function parseTS(dateStr,timeStr){
-
-  const d = dateStr.split('/');
-  const t = timeStr.split(':');
-
-  return new Date(
-    Number(d[0]),
-    Number(d[1])-1,
-    Number(d[2]),
-    Number(t[0]),
-    Number(t[1]),
-    Number(t[2])
-  ).getTime();
-}
-
-/* ==========================================
-   LOAD JSON
-========================================== */
-
-async function loadData(){
-
-  try{
-
-    const res = await fetch('/data');
-
-    fullData =
-      (await res.json())
-
-      .map(d=>({
-        ...d,
-        _ts:parseTS(d.date,d.time)
-      }))
-
-      .sort((a,b)=>a._ts-b._ts);
-
-    applyFilter();
-
-  }catch(e){
-
-    console.error(e);
-  }
-}
-
-/* ==========================================
-   FILTER
-========================================== */
-
-function applyFilter(){
-
-  const s =
-    document.getElementById('start').value;
-
-  const e =
-    document.getElementById('end').value;
-
-  const startTime =
-    s ? new Date(s).getTime() : 0;
-
-  const endTime =
-    e ? new Date(e).getTime() : Infinity;
-
-  let filtered =
-    fullData.filter(d=>
-      d._ts >= startTime &&
-      d._ts <= endTime
-    );
-
-  filtered = filtered.slice(-3000);
-
-  updateTable(filtered);
-
-  updateChart(filtered);
-}
-
-/* ==========================================
-   TABLE
-========================================== */
-
-function updateTable(data){
-
-  const tbody =
-    document.getElementById('tbl');
-
-  let html = '';
-
-  data.slice().reverse().forEach(d=>{
-
-    html += `
-    <tr>
-      <td>${d.date}</td>
-      <td>${d.time}</td>
-      <td>${d.device}</td>
-      <td>${Number(d.temp).toFixed(2)}</td>
-      <td>${Number(d.hum).toFixed(2)}</td>
-      <td>${Number(d.pres).toFixed(1)}</td>
-      <td>${d.rssi ?? '-'}</td>
-    </tr>
-    `;
-  });
-
-  tbody.innerHTML = html;
-}
-
-/* ==========================================
-   BUTTON
-========================================== */
-
-function changeType(type){
-
-  currentType = type;
-
-  applyFilter();
-}
-
-/* ==========================================
-   CHART
-========================================== */
-
-function updateChart(data){
-
-  ['temp','hum','pres'].forEach(t=>{
-
-    document
-      .getElementById('btn_'+t)
-      .className =
-        (t===currentType)
-        ? 'active'
-        : '';
-  });
-
-  if(chart){
-    chart.destroy();
-  }
-
-  if(data.length===0){
-    return;
-  }
-
-  const labelSet = new Set();
-
-  const groups = {};
-
-  data.forEach(d=>{
-
-    const label =
-      d.date.split('/').slice(1).join('/') +
-      " " +
-      d.time.slice(0,5);
-
-    labelSet.add(label);
-
-    if(!groups[d.device]){
-      groups[d.device] = {
-        vals:{}
-      };
-    }
-
-    groups[d.device]
-      .vals[label] =
-        d[currentType];
-  });
-
-  const labels =
-    Array.from(labelSet);
-
-  const datasets =
-    Object.keys(groups).map(dev=>({
-
-      label:dev,
-
-      data:labels.map(l=>
-        groups[dev].vals[l] ?? null
-      ),
-
-      borderColor:getColor(dev),
-
-      backgroundColor:getColor(dev),
-
-      borderWidth:2,
-
-      tension:0.15,
-
-      spanGaps:true,
-
-      pointRadius:1
-
-    }));
-
-  chart = new Chart(
-
-    document.getElementById('chart'),
-
-    {
-      type:'line',
-
-      data:{
-        labels:labels,
-        datasets:datasets
-      },
-
-      options:{
-
-        responsive:true,
-
-        maintainAspectRatio:false,
-
-        animation:false,
-
-        interaction:{
-          mode:'index',
-          intersect:false
-        },
-
-        plugins:{
-          legend:{
-            display:true
-          }
-        },
-
-        scales:{
-          x:{
-            ticks:{
-              maxTicksLimit:20
-            }
-          }
+const DB_URL = "https://environmental-monitoring-542a1-default-rtdb.asia-southeast1.firebasedatabase.app";
+let chart = null; let currentType = 'temp'; let fullData = [];
+let isAutoMode = true; // 初回は自動モード（最新1000件制限取得）
+let refreshIntervalId = null;
+
+function getColor(dev){ let hash = 0; for(let i=0;i<dev.length;i++) hash = dev.charCodeAt(i) + ((hash << 7) - hash); return `hsl(${Math.abs(hash * 137 % 360)}, 70%, 50%)`; }
+function parseTS(dStr, tStr) { const d = dStr.split('/'); const t = tStr.split(':'); return new Date(d[0], d[1]-1, d[2], t[0], t[1], t[2]).getTime(); }
+
+// モード切り替えおよび手動実行のハンドラ
+async function toggleMode() {
+    const modeBtn = document.getElementById('btn_mode');
+    if (isAutoMode) {
+        // 自動モードから手動モードへの切り替え
+        isAutoMode = false;
+        modeBtn.innerText = "手動更新を実行";
+        modeBtn.style.background = "#dc3545";
+        modeBtn.style.color = "#fff";
+        if (refreshIntervalId) {
+            clearInterval(refreshIntervalId); // 1分ごとの定期更新をストップ
+            refreshIntervalId = null;
         }
-      }
+        console.log("[Mode] 手動モードに切り替わりました。ボタンを押すと当月データを全量取得します。");
+    } else {
+        // 手動更新ボタンが押された時の全量ダウンロード処理
+        console.log("[Mode] 手動更新要求を受信。当月データを全量取得します。");
+        await loadData(true); 
     }
-  );
 }
 
-/* ==========================================
-   AUTO LOAD
-========================================== */
+async function loadData(fetchAll = false) {
+    const now = new Date();
+    const monthTag = `log_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}`;
+    
+    // パラメータの設定：fetchAllが偽（自動モード）なら最新1000件のみに絞り込む（通信量カット）
+    let url = `${DB_URL}/${monthTag}.json`;
+    if (!fetchAll) {
+        url += `?orderBy="$key"&limitToLast=1000`;
+    }
+    
+    try {
+        const res = await fetch(url);
+        const json = await res.json();
+        if(!json) {
+            fullData = [];
+            applyFilter();
+            return;
+        }
+        // 階層構造(オブジェクトのネスト)をフラットな配列に変換
+        fullData = Object.values(json).map(d => ({ ...d, _ts: parseTS(d.date, d.time) })).sort((a,b)=>a._ts - b._ts);
+        applyFilter();
+    } catch(e) { console.error("Data load error:", e); }
+}
 
-loadData();
+function applyFilter() {
+    const sT = document.getElementById('start').value ? new Date(document.getElementById('start').value).getTime() : 0;
+    const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
+    let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
+    
+    // 自動モード時は既に1000件以下。手動全量取得時でもクラウド側は直近1000件を基準に表示制限
+    const displayList = filtered.slice(-1000); 
+    const tbody = document.getElementById('tbl'); let h = '';
+    displayList.slice().reverse().forEach(d => {
+        h += `<tr><td>${d.date}</td><td>${d.time}</td><td>${d.device}</td><td>${Number(d.temp).toFixed(2)}</td><td>${Number(d.hum).toFixed(2)}</td><td>${Number(d.pres).toFixed(1)}</td><td>${d.rssi||'-'}</td></tr>`;
+    });
+    tbody.innerHTML = h;
+    updateChart(displayList);
+}
 
-setInterval(loadData,60000);
+function changeType(t){ currentType = t; applyFilter(); }
 
+function updateChart(data) {
+    ['temp','hum','pres'].forEach(t => document.getElementById('btn_'+t).className = (t===currentType)?'active':'');
+    if(chart) chart.destroy();
+    if(data.length === 0) return;
+    const labelSet = new Set(); const groups = {};
+    data.forEach(d => {
+        const lbl = d.date.split('/').slice(1).join('/') + " " + d.time.slice(0,5);
+        labelSet.add(lbl);
+        if(!groups[d.device]) groups[d.device] = {vals:{}};
+        groups[d.device].vals[lbl] = d[currentType];
+    });
+    const labels = Array.from(labelSet);
+    const datasets = Object.keys(groups).map(dev => ({
+        label: dev, data: labels.map(l => groups[dev].vals[l] || null),
+        borderColor: getColor(dev), backgroundColor: getColor(dev), tension: 0.1, spanGaps: true
+    }));
+    chart = new Chart(document.getElementById('chart'), {
+        type: 'line', data: {labels, datasets},
+        options: { responsive: true, maintainAspectRatio: false, animation: false }
+    });
+}
+
+// 起動初期処理
+loadData(false); 
+// 自動モード用の1分更新タイマー
+refreshIntervalId = setInterval(() => {
+    if (isAutoMode) {
+        loadData(false);
+    }
+}, 60000);
 </script>
-
 </body>
 </html>
