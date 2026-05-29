@@ -31,7 +31,7 @@
     <button id="btn_hum" onclick="changeType('hum')">湿度(%)</button>
     <button id="btn_pres" onclick="changeType('pres')">気圧(hPa)</button>
     <div class="mode-divider"></div>
-    <button id="btn_mode" onclick="toggleMode()" style="background:#f8f9fa; font-weight:bold; border-color:#6c757d;">モード: 自動</button>
+    <button id="btn_mode" onclick="toggleMode()" style="background:#e3f2fd; font-weight:bold; border-color:#007bff; color:#0056b3;">モード: 自動 (1分更新)</button>
   </div>
 </div>
 <div id="chart-container"><canvas id="chart"></canvas></div>
@@ -40,55 +40,62 @@
 <script>
 const DB_URL = "https://environmental-monitoring-542a1-default-rtdb.asia-southeast1.firebasedatabase.app";
 let chart = null; let currentType = 'temp'; let fullData = [];
-let isAutoMode = true; // 初回は自動モード（最新1000件制限取得）
+let isAutoMode = true; // デフォルトは自動更新モード
 let refreshIntervalId = null;
 
-function getColor(dev){ let hash = 0; for(let i=0;i<dev.length;i++) hash = dev.charCodeAt(i) + ((hash << 7) - hash); return `hsl(${Math.abs(hash * 137 % 360)}, 70%, 50%)`; }
+// 修正点②：カラー重複を防ぎ、画面を鮮やかに見やすくするための明確なパレット定義
+const PRESET_COLORS = ['#3498db', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
+
 function parseTS(dStr, tStr) { const d = dStr.split('/'); const t = tStr.split(':'); return new Date(d[0], d[1]-1, d[2], t[0], t[1], t[2]).getTime(); }
 
-// モード切り替えおよび手動実行のハンドラ
+// 修正点③：自動と手動のモード切替制御
 async function toggleMode() {
     const modeBtn = document.getElementById('btn_mode');
     if (isAutoMode) {
-        // 自動モードから手動モードへの切り替え
+        // 【自動 → 手動への切り替え】
         isAutoMode = false;
         modeBtn.innerText = "手動更新を実行";
-        modeBtn.style.background = "#dc3545";
+        modeBtn.style.background = "#dc3545"; // 手動ボタンとして認識しやすい赤色
         modeBtn.style.color = "#fff";
+        modeBtn.style.borderColor = "#bd2130";
         if (refreshIntervalId) {
-            clearInterval(refreshIntervalId); // 1分ごとの定期更新をストップ
+            clearInterval(refreshIntervalId); // 定期タイマーを停止して無駄な通信を削減
             refreshIntervalId = null;
         }
-        console.log("[Mode] 手動モードに切り替わりました。ボタンを押すと当月データを全量取得します。");
+        console.log("[Debug Mode] 手動更新モードに変更されました。ボタンを押すと月間全データをダウンロードします。");
     } else {
-        // 手動更新ボタンが押された時の全量ダウンロード処理
-        console.log("[Mode] 手動更新要求を受信。当月データを全量取得します。");
-        await loadData(true); 
+        // 【手動モード時：ボタン押下で全データをロード】
+        console.log("[Debug Mode] 手動更新が要求されました。当月の全データをロード中...");
+        await loadData(true); // 引数trueで全件ダウンロードを実行
     }
 }
 
 async function loadData(fetchAll = false) {
     const now = new Date();
     const monthTag = `log_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}`;
-    
-    // パラメータの設定：fetchAllが偽（自動モード）なら最新1000件のみに絞り込む（通信量カット）
     let url = `${DB_URL}/${monthTag}.json`;
+    
     if (!fetchAll) {
+        // 自動モード時は、Firebaseのクエリ制約を用いて通信量を最新1000件のみに抑制（Sparkプラン対策）
         url += `?orderBy="$key"&limitToLast=1000`;
+        console.log(`[Debug Data] 自動定期更新: 最新1000件のみを要求します。ターゲット: ${monthTag}`);
+    } else {
+        console.log(`[Debug Data] 手動全量取得: 全データを要求します。ターゲット: ${monthTag}`);
     }
     
     try {
         const res = await fetch(url);
         const json = await res.json();
         if(!json) {
+            console.log("[Debug Data] 該当月のデータが見つからないか、空です。");
             fullData = [];
             applyFilter();
             return;
         }
-        // 階層構造(オブジェクトのネスト)をフラットな配列に変換
         fullData = Object.values(json).map(d => ({ ...d, _ts: parseTS(d.date, d.time) })).sort((a,b)=>a._ts - b._ts);
+        console.log(`[Debug Data] データ受信完了。解析レコード数: ${fullData.length} 件`);
         applyFilter();
-    } catch(e) { console.error("Data load error:", e); }
+    } catch(e) { console.error("[Debug Error] データ読み込み失敗:", e); }
 }
 
 function applyFilter() {
@@ -96,8 +103,7 @@ function applyFilter() {
     const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
     let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
     
-    // 自動モード時は既に1000件以下。手動全量取得時でもクラウド側は直近1000件を基準に表示制限
-    const displayList = filtered.slice(-1000); 
+    const displayList = filtered.slice(-1000); // 表示は直近最大1000件に制限
     const tbody = document.getElementById('tbl'); let h = '';
     displayList.slice().reverse().forEach(d => {
         h += `<tr><td>${d.date}</td><td>${d.time}</td><td>${d.device}</td><td>${Number(d.temp).toFixed(2)}</td><td>${Number(d.hum).toFixed(2)}</td><td>${Number(d.pres).toFixed(1)}</td><td>${d.rssi||'-'}</td></tr>`;
@@ -112,6 +118,7 @@ function updateChart(data) {
     ['temp','hum','pres'].forEach(t => document.getElementById('btn_'+t).className = (t===currentType)?'active':'');
     if(chart) chart.destroy();
     if(data.length === 0) return;
+    
     const labelSet = new Set(); const groups = {};
     data.forEach(d => {
         const lbl = d.date.split('/').slice(1).join('/') + " " + d.time.slice(0,5);
@@ -120,19 +127,34 @@ function updateChart(data) {
         groups[d.device].vals[lbl] = d[currentType];
     });
     const labels = Array.from(labelSet);
-    const datasets = Object.keys(groups).map(dev => ({
-        label: dev, data: labels.map(l => groups[dev].vals[l] || null),
-        borderColor: getColor(dev), backgroundColor: getColor(dev), tension: 0.1, spanGaps: true
-    }));
+    
+    // 修正点①：凡例の順番をデバイス名（M11〜, S11〜等）のアルファベット昇順にソートして並び替え
+    const sortedDevices = Object.keys(groups).sort();
+    console.log("[Debug UI] 凡例ソート順確定:", sortedDevices);
+
+    // 修正点②：ソート順に基づいて固定カラーパレットから異なる色をそれぞれ順番に付与
+    const datasets = sortedDevices.map((dev, index) => {
+        const color = PRESET_COLORS[index % PRESET_COLORS.length];
+        return {
+            label: dev, 
+            data: labels.map(l => groups[dev].vals[l] || null),
+            borderColor: color, 
+            backgroundColor: color, 
+            tension: 0.1, 
+            spanGaps: true
+        };
+    });
+    
     chart = new Chart(document.getElementById('chart'), {
         type: 'line', data: {labels, datasets},
         options: { responsive: true, maintainAspectRatio: false, animation: false }
     });
 }
 
-// 起動初期処理
+// 起動時初期ダウンロード（初回は自動モードの1000件制約で起動）
 loadData(false); 
-// 自動モード用の1分更新タイマー
+
+// 自動モード用の1分間隔の定期更新タイマーを設定
 refreshIntervalId = setInterval(() => {
     if (isAutoMode) {
         loadData(false);
