@@ -6,7 +6,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   html,body{margin:0;padding:0;height:100vh;overflow:hidden;font-family:sans-serif;background:#f0f2f5;}
-  .header-row{display:grid;grid-template-columns: 1.5fr 1fr 1.8fr; align-items:center; height:6vh; padding:0 15px; background:#fff; border-bottom:1px solid #ccc;}
+  .header-row{display:grid;grid-template-columns: 1.2fr 1fr 2.1fr; align-items:center; height:6vh; padding:0 15px; background:#fff; border-bottom:1px solid #ccc;}
   h2{margin:0; font-size:24px; text-align:center;}
   .filter-box{font-size:14px; display:flex; gap:5px;}
   .filter-box input{font-size:14px; padding:2px; width:160px;}
@@ -14,6 +14,12 @@
   .mode-divider{width:1px; height:20px; background:#ccc; margin:0 8px;}
   button{margin:0 3px;padding:6px 15px;font-size:14px;cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:4px;transition:0.2s;}
   button.active{background:#007bff;color:#fff;border-color:#0056b3;}
+  
+  /* 修正点①：更新モードスイッチと手動トリガーボタンのスタイル */
+  .btn-toggle-auto { background:#e3f2fd; color:#0056b3; font-weight:bold; border-color:#b3e5fc; }
+  .btn-toggle-manual { background:#f5f5f5; color:#333; font-weight:bold; border-color:#ccc; }
+  .btn-trigger-fetch { background:#28a745; color:#fff; border-color:#218838; font-weight:bold; }
+  
   #chart-container{position:relative; width:99vw; height:70vh; background:#fff; margin:5px auto; padding:10px; box-sizing:border-box; border:1px solid #ddd; border-radius:8px;}
   .table-outer{width:100%; display:flex; justify-content:center;}
   .table-wrapper{width:60%; height:22vh; overflow-y:auto; background:#fff; border:1px solid #333; border-radius:4px;}
@@ -30,8 +36,11 @@
     <button id="btn_temp" onclick="changeType('temp')">温度(℃)</button>
     <button id="btn_hum" onclick="changeType('hum')">湿度(%)</button>
     <button id="btn_pres" onclick="changeType('pres')">気圧(hPa)</button>
+    
     <div class="mode-divider"></div>
-    <button id="btn_mode" onclick="toggleMode()" style="background:#e3f2fd; font-weight:bold; border-color:#007bff; color:#0056b3;">モード: 自動 (1分更新)</button>
+    
+    <button id="btn_mode_switch" class="btn-toggle-auto" onclick="toggleUpdateMode()">更新モード: 自動</button>
+    <button id="btn_manual_fetch" class="btn-trigger-fetch" onclick="triggerManualFetch()" style="display:none;">最新データ読込 ↻</button>
   </div>
 </div>
 <div id="chart-container"><canvas id="chart"></canvas></div>
@@ -40,34 +49,61 @@
 <script>
 const DB_URL = "https://environmental-monitoring-542a1-default-rtdb.asia-southeast1.firebasedatabase.app";
 let chart = null; let currentType = 'temp'; let fullData = [];
-let isAutoMode = true; // デフォルトは自動更新モード
+
+// 修正点①：モード管理フラグとタイマー変数の定義
+let isAutoMode = true; 
 let refreshIntervalId = null;
 
-// 修正点②：カラー重複を防ぎ、画面を鮮やかに見やすくするための明確なパレット定義
 const PRESET_COLORS = ['#3498db', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
 
 function parseTS(dStr, tStr) { const d = dStr.split('/'); const t = tStr.split(':'); return new Date(d[0], d[1]-1, d[2], t[0], t[1], t[2]).getTime(); }
 
-// 修正点③：自動と手動のモード切替制御
-async function toggleMode() {
-    const modeBtn = document.getElementById('btn_mode');
+// 修正点①：自動更新と手動更新の相互切り替え（トグル）処理
+function toggleUpdateMode() {
+    const switchBtn = document.getElementById('btn_mode_switch');
+    const fetchBtn = document.getElementById('btn_manual_fetch');
+    
     if (isAutoMode) {
-        // 【自動 → 手動への切り替え】
+        // 【自動モード → 手動モードへの移行】
         isAutoMode = false;
-        modeBtn.innerText = "手動更新を実行";
-        modeBtn.style.background = "#dc3545"; // 手動ボタンとして認識しやすい赤色
-        modeBtn.style.color = "#fff";
-        modeBtn.style.borderColor = "#bd2130";
+        switchBtn.innerText = "更新モード: 手動";
+        switchBtn.className = "btn-toggle-manual";
+        fetchBtn.style.display = "inline-block"; // 手動用のデータ更新ボタンを表示
+        
         if (refreshIntervalId) {
-            clearInterval(refreshIntervalId); // 定期タイマーを停止して無駄な通信を削減
+            clearInterval(refreshIntervalId); // 自動タイマー（インターバル）をクリアして停止
             refreshIntervalId = null;
         }
-        console.log("[Debug Mode] 手動更新モードに変更されました。ボタンを押すと月間全データをダウンロードします。");
+        console.log("[Mode Switch] 手動更新モードへ切り替わりました。バックグラウンド自動通信を停止しました。");
     } else {
-        // 【手動モード時：ボタン押下で全データをロード】
-        console.log("[Debug Mode] 手動更新が要求されました。当月の全データをロード中...");
-        await loadData(true); // 引数trueで全件ダウンロードを実行
+        // 【手動モード → 自動モードへの移行】
+        isAutoMode = true;
+        switchBtn.innerText = "更新モード: 自動";
+        switchBtn.className = "btn-toggle-auto";
+        fetchBtn.style.display = "none"; // 手動用データ更新ボタンを非表示
+        
+        // 即座に一度データを自動同期し、再度1分おきのタイマーを再起動
+        console.log("[Mode Switch] 自動更新モードへ切り替わりました。定期タイマー(1分)を再開します。");
+        loadData(false);
+        startAutoTimer();
     }
+}
+
+// 修正点①：手動モード時に、ユーザーの意思で任意にデータを読み込むトリガー関数
+async function triggerManualFetch() {
+    console.log("[Manual Trigger] ユーザー操作により最新データの即時ロードを実行します。");
+    await loadData(true); // 引数trueで月間すべてのデータを完全に取得
+}
+
+// 自動タイマーの起動処理を関数にカプセル化
+function startAutoTimer() {
+    if (refreshIntervalId) clearInterval(refreshIntervalId);
+    refreshIntervalId = setInterval(() => {
+        if (isAutoMode) {
+            console.log("[Timer Tick] 自動更新タイミングに到達しました。最新1000件データをロードします。");
+            loadData(false);
+        }
+    }, 60000); // 60秒周期
 }
 
 async function loadData(fetchAll = false) {
@@ -76,26 +112,26 @@ async function loadData(fetchAll = false) {
     let url = `${DB_URL}/${monthTag}.json`;
     
     if (!fetchAll) {
-        // 自動モード時は、Firebaseのクエリ制約を用いて通信量を最新1000件のみに抑制（Sparkプラン対策）
+        // 自動モード時は軽量化のため、Firebaseの制限クエリで最新1000件のみを取得（従量課金・容量制限対策）
         url += `?orderBy="$key"&limitToLast=1000`;
-        console.log(`[Debug Data] 自動定期更新: 最新1000件のみを要求します。ターゲット: ${monthTag}`);
+        console.log(`[Fetch Data] 通信量を抑えるため最新1000件を制限取得中... パス: ${monthTag}`);
     } else {
-        console.log(`[Debug Data] 手動全量取得: 全データを要求します。ターゲット: ${monthTag}`);
+        console.log(`[Fetch Data] 全期間データを詳細解析するため全件同期中... パス: ${monthTag}`);
     }
     
     try {
         const res = await fetch(url);
         const json = await res.json();
         if(!json) {
-            console.log("[Debug Data] 該当月のデータが見つからないか、空です。");
+            console.log("[Fetch Data] データベース内に対象月のデータレコードが存在しません。");
             fullData = [];
             applyFilter();
             return;
         }
         fullData = Object.values(json).map(d => ({ ...d, _ts: parseTS(d.date, d.time) })).sort((a,b)=>a._ts - b._ts);
-        console.log(`[Debug Data] データ受信完了。解析レコード数: ${fullData.length} 件`);
+        console.log(`[Fetch Data] ロード完了。読み込み成功件数: ${fullData.length} 件`);
         applyFilter();
-    } catch(e) { console.error("[Debug Error] データ読み込み失敗:", e); }
+    } catch(e) { console.error("[Fetch Error] 通信エラーが発生しました。理由:", e); }
 }
 
 function applyFilter() {
@@ -103,7 +139,7 @@ function applyFilter() {
     const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
     let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
     
-    const displayList = filtered.slice(-1000); // 表示は直近最大1000件に制限
+    const displayList = filtered.slice(-1000); 
     const tbody = document.getElementById('tbl'); let h = '';
     displayList.slice().reverse().forEach(d => {
         h += `<tr><td>${d.date}</td><td>${d.time}</td><td>${d.device}</td><td>${Number(d.temp).toFixed(2)}</td><td>${Number(d.hum).toFixed(2)}</td><td>${Number(d.pres).toFixed(1)}</td><td>${d.rssi||'-'}</td></tr>`;
@@ -128,11 +164,8 @@ function updateChart(data) {
     });
     const labels = Array.from(labelSet);
     
-    // 修正点①：凡例の順番をデバイス名（M11〜, S11〜等）のアルファベット昇順にソートして並び替え
     const sortedDevices = Object.keys(groups).sort();
-    console.log("[Debug UI] 凡例ソート順確定:", sortedDevices);
 
-    // 修正点②：ソート順に基づいて固定カラーパレットから異なる色をそれぞれ順番に付与
     const datasets = sortedDevices.map((dev, index) => {
         const color = PRESET_COLORS[index % PRESET_COLORS.length];
         return {
@@ -151,15 +184,9 @@ function updateChart(data) {
     });
 }
 
-// 起動時初期ダウンロード（初回は自動モードの1000件制約で起動）
-loadData(false); 
-
-// 自動モード用の1分間隔の定期更新タイマーを設定
-refreshIntervalId = setInterval(() => {
-    if (isAutoMode) {
-        loadData(false);
-    }
-}, 60000);
+// 初期化起動処理
+loadData(false);     // 初回ダウンロード（自動モード仕様）
+startAutoTimer();    // 自動更新タイマー（1分おき）の稼働開始
 </script>
 </body>
 </html>
