@@ -15,7 +15,6 @@
   button{margin:0 3px;padding:6px 15px;font-size:14px;cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:4px;transition:0.2s;}
   button.active{background:#007bff;color:#fff;border-color:#0056b3;}
   
-  /* 修正点①：更新モードスイッチと手動トリガーボタンのスタイル */
   .btn-toggle-auto { background:#e3f2fd; color:#0056b3; font-weight:bold; border-color:#b3e5fc; }
   .btn-toggle-manual { background:#f5f5f5; color:#333; font-weight:bold; border-color:#ccc; }
   .btn-trigger-fetch { background:#28a745; color:#fff; border-color:#218838; font-weight:bold; }
@@ -50,7 +49,6 @@
 const DB_URL = "https://environmental-monitoring-542a1-default-rtdb.asia-southeast1.firebasedatabase.app";
 let chart = null; let currentType = 'temp'; let fullData = [];
 
-// 修正点①：モード管理フラグとタイマー変数の定義
 let isAutoMode = true; 
 let refreshIntervalId = null;
 
@@ -58,44 +56,38 @@ const PRESET_COLORS = ['#3498db', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#
 
 function parseTS(dStr, tStr) { const d = dStr.split('/'); const t = tStr.split(':'); return new Date(d[0], d[1]-1, d[2], t[0], t[1], t[2]).getTime(); }
 
-// 修正点①：自動更新と手動更新の相互切り替え（トグル）処理
 function toggleUpdateMode() {
     const switchBtn = document.getElementById('btn_mode_switch');
     const fetchBtn = document.getElementById('btn_manual_fetch');
     
     if (isAutoMode) {
-        // 【自動モード → 手動モードへの移行】
         isAutoMode = false;
         switchBtn.innerText = "更新モード: 手動";
         switchBtn.className = "btn-toggle-manual";
-        fetchBtn.style.display = "inline-block"; // 手動用のデータ更新ボタンを表示
+        fetchBtn.style.display = "inline-block";
         
         if (refreshIntervalId) {
-            clearInterval(refreshIntervalId); // 自動タイマー（インターバル）をクリアして停止
+            clearInterval(refreshIntervalId);
             refreshIntervalId = null;
         }
         console.log("[Mode Switch] 手動更新モードへ切り替わりました。バックグラウンド自動通信を停止しました。");
     } else {
-        // 【手動モード → 自動モードへの移行】
         isAutoMode = true;
         switchBtn.innerText = "更新モード: 自動";
         switchBtn.className = "btn-toggle-auto";
-        fetchBtn.style.display = "none"; // 手動用データ更新ボタンを非表示
+        fetchBtn.style.display = "none";
         
-        // 即座に一度データを自動同期し、再度1分おきのタイマーを再起動
         console.log("[Mode Switch] 自動更新モードへ切り替わりました。定期タイマー(1分)を再開します。");
         loadData(false);
         startAutoTimer();
     }
 }
 
-// 修正点①：手動モード時に、ユーザーの意思で任意にデータを読み込むトリガー関数
 async function triggerManualFetch() {
     console.log("[Manual Trigger] ユーザー操作により最新データの即時ロードを実行します。");
-    await loadData(true); // 引数trueで月間すべてのデータを完全に取得
+    await loadData(true); 
 }
 
-// 自動タイマーの起動処理を関数にカプセル化
 function startAutoTimer() {
     if (refreshIntervalId) clearInterval(refreshIntervalId);
     refreshIntervalId = setInterval(() => {
@@ -103,7 +95,7 @@ function startAutoTimer() {
             console.log("[Timer Tick] 自動更新タイミングに到達しました。最新1000件データをロードします。");
             loadData(false);
         }
-    }, 60000); // 60秒周期
+    }, 60000);
 }
 
 async function loadData(fetchAll = false) {
@@ -112,7 +104,6 @@ async function loadData(fetchAll = false) {
     let url = `${DB_URL}/${monthTag}.json`;
     
     if (!fetchAll) {
-        // 自動モード時は軽量化のため、Firebaseの制限クエリで最新1000件のみを取得（従量課金・容量制限対策）
         url += `?orderBy="$key"&limitToLast=1000`;
         console.log(`[Fetch Data] 通信量を抑えるため最新1000件を制限取得中... パス: ${monthTag}`);
     } else {
@@ -134,13 +125,22 @@ async function loadData(fetchAll = false) {
     } catch(e) { console.error("[Fetch Error] 通信エラーが発生しました。理由:", e); }
 }
 
+// 修正仕様：指定された期間範囲データ（特に終了日時）を基準にして、過去方向へ最大1,000件を抽出する
 function applyFilter() {
     const sT = document.getElementById('start').value ? new Date(document.getElementById('start').value).getTime() : 0;
     const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
-    let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
     
+    // 1. まず指定された期間（開始～終了）の枠内に収まるデータをタイムスタンプ順で抽出
+    let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
+    console.log(`[Filter] 日時指定範囲内の該当総件数: ${filtered.length} 件`);
+    
+    // 2. 抽出された配列は古い順にソートされているため、末尾（＝終了日時に最も近いデータ）から
+    // 過去へ遡って最大1000件を切り出します。(.slice(-1000) は配列の末尾から1000件を取得します)
     const displayList = filtered.slice(-1000); 
+    console.log(`[Filter] 終了日時から過去へ遡り、最大 ${displayList.length} 件をグラフ表示対象に確定しました。`);
+    
     const tbody = document.getElementById('tbl'); let h = '';
+    // テーブル表示は直近に測定されたデータ（日時が新しいデータ）が上にくるように反転してレンダリング
     displayList.slice().reverse().forEach(d => {
         h += `<tr><td>${d.date}</td><td>${d.time}</td><td>${d.device}</td><td>${Number(d.temp).toFixed(2)}</td><td>${Number(d.hum).toFixed(2)}</td><td>${Number(d.pres).toFixed(1)}</td><td>${d.rssi||'-'}</td></tr>`;
     });
@@ -185,8 +185,8 @@ function updateChart(data) {
 }
 
 // 初期化起動処理
-loadData(false);     // 初回ダウンロード（自動モード仕様）
-startAutoTimer();    // 自動更新タイマー（1分おき）の稼働開始
+loadData(false);     
+startAutoTimer();    
 </script>
 </body>
 </html>
