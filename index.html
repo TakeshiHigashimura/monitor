@@ -2,7 +2,10 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>CLOUD MONITOR</title>
+<title>CLOUD MONITOR (SECURE)</title>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   html,body{margin:0;padding:0;height:100vh;overflow:hidden;font-family:sans-serif;background:#f0f2f5;}
@@ -19,6 +22,9 @@
   .btn-toggle-manual { background:#f5f5f5; color:#333; font-weight:bold; border-color:#ccc; }
   .btn-trigger-fetch { background:#28a745; color:#fff; border-color:#218838; font-weight:bold; }
   
+  /* ログイン状態の表示スタイル */
+  #auth-status { font-size:12px; color:#555; margin-right:10px; font-weight:bold; }
+  
   #chart-container{position:relative; width:99vw; height:70vh; background:#fff; margin:5px auto; padding:10px; box-sizing:border-box; border:1px solid #ddd; border-radius:8px;}
   .table-outer{width:100%; display:flex; justify-content:center;}
   .table-wrapper{width:60%; height:22vh; overflow-y:auto; background:#fff; border:1px solid #333; border-radius:4px;}
@@ -32,6 +38,8 @@
   <div class="filter-box">開始:<input type="datetime-local" id="start"> ～ 終了:<input type="datetime-local" id="end"><button onclick="applyFilter()" style="background:#28a745;color:white;border:none;">適用</button></div>
   <h2>クラウド環境モニター</h2>
   <div class="controls">
+    <span id="auth-status">認証確認中...</span>
+    
     <button id="btn_temp" onclick="changeType('temp')">温度(℃)</button>
     <button id="btn_hum" onclick="changeType('hum')">湿度(%)</button>
     <button id="btn_pres" onclick="changeType('pres')">気圧(hPa)</button>
@@ -46,15 +54,55 @@
 <div class="table-outer"><div class="table-wrapper"><table><thead><tr><th>Date</th><th>Time</th><th>Device</th><th>Temp</th><th>Hum</th><th>Pres</th><th>RSSI</th></tr></thead><tbody id="tbl"></tbody></table></div></div>
 
 <script>
-const DB_URL = "https://enviroment-monitor-29c36-default-rtdb.asia-southeast1.firebasedatabase.app";
-let chart = null; let currentType = 'temp'; let fullData = [];
+// ============================================================
+// ⚙️ Firebase 初期設定（あなたの環境に合わせて書き換えてください）
+// ============================================================
+const firebaseConfig = {
+  apiKey: "あなたの新しいWEB_API_KEY",
+  authDomain: "あなたのプロジェクトID.firebaseapp.com",
+  projectId: "あなたのプロジェクトID",
+  databaseURL: "https://enviroment-monitor-29c36-default-rtdb.asia-southeast1.firebasedatabase.app" // ご提示のURL
+};
+firebase.initializeApp(firebaseConfig);
 
+let chart = null; let currentType = 'temp'; let fullData = [];
 let isAutoMode = true; 
 let refreshIntervalId = null;
 
 const PRESET_COLORS = ['#3498db', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
 
 function parseTS(dStr, tStr) { const d = dStr.split('/'); const t = tStr.split(':'); return new Date(d[0], d[1]-1, d[2], t[0], t[1], t[2]).getTime(); }
+
+// ============================================================
+// 🔑 Google認証ログイン処理
+// ============================================================
+function handleAuth() {
+  // ログイン状態を監視するリスナー
+  firebase.auth().onAuthStateChanged((user) => {
+    if (user) {
+      console.log("[Auth] ログイン成功。ユーザー:", user.email);
+      console.log("[Auth] あなたのUID:", user.uid); // 初回はこのUIDをFirebaseルールにコピーします
+      document.getElementById("auth-status").innerText = `👤 ${user.displayName} (接続済)`;
+      document.getElementById("auth-status").style.color = "#28a745";
+      
+      // ログインに成功したらデータの自動読み込みを開始
+      loadData(false);     
+      startAutoTimer();    
+    } else {
+      console.log("[Auth] 未ログイン。Googleログインポップアップを起動します...");
+      document.getElementById("auth-status").innerText = "🔒 未認証 (ログインしてください)";
+      document.getElementById("auth-status").style.color = "#dc3545";
+      
+      // ポップアップでGoogleログインを実行
+      const provider = new firebase.auth.GoogleAuthProvider();
+      firebase.auth().signInWithPopup(provider)
+        .catch((error) => {
+          console.error("[Auth] ログインエラー:", error.message);
+          alert("ログインに失敗しました。閲覧するにはGoogle認証が必要です。\n理由: " + error.message);
+        });
+    }
+  });
+}
 
 function toggleUpdateMode() {
     const switchBtn = document.getElementById('btn_mode_switch');
@@ -70,77 +118,82 @@ function toggleUpdateMode() {
             clearInterval(refreshIntervalId);
             refreshIntervalId = null;
         }
-        console.log("[Mode Switch] 手動更新モードへ切り替わりました。バックグラウンド自動通信を停止しました。");
+        console.log("[Mode Switch] 手動更新モードへ切り替わりました。");
     } else {
         isAutoMode = true;
         switchBtn.innerText = "更新モード: 自動";
         switchBtn.className = "btn-toggle-auto";
         fetchBtn.style.display = "none";
         
-        console.log("[Mode Switch] 自動更新モードへ切り替わりました。定期タイマー(1分)を再開します。");
+        console.log("[Mode Switch] 自動更新モードへ切り替わりました。");
         loadData(false);
         startAutoTimer();
     }
 }
 
 async function triggerManualFetch() {
-    console.log("[Manual Trigger] ユーザー操作により最新データの即時ロードを実行します。");
+    console.log("[Manual Trigger] 即時ロードを実行します。");
     await loadData(true); 
 }
 
 function startAutoTimer() {
     if (refreshIntervalId) clearInterval(refreshIntervalId);
     refreshIntervalId = setInterval(() => {
-        if (isAutoMode) {
-            console.log("[Timer Tick] 自動更新タイミングに到達しました。最新1000件データをロードします。");
+        if (isAutoMode && firebase.auth().currentUser) {
+            console.log("[Timer Tick] 自動更新を実行します。");
             loadData(false);
         }
     }, 60000);
 }
 
+// SDK（firebase.database()）を使用した安全なデータ取得処理へ修正
 async function loadData(fetchAll = false) {
+    if (!firebase.auth().currentUser) {
+        console.log("[Fetch Data] 認証が完了していないため、データ取得をスキップします。");
+        return;
+    }
+
     const now = new Date();
     const monthTag = `log_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}`;
-    let url = `${DB_URL}/${monthTag}.json`;
     
+    console.log(`[Fetch Data] データベースからロード中... パス: /${monthTag}`);
+    
+    let dbRef = firebase.database().ref(monthTag);
+    
+    // 手動モード(fetchAll)以外は、通信量を抑えるため最新1000件に制限
     if (!fetchAll) {
-        url += `?orderBy="$key"&limitToLast=1000`;
-        console.log(`[Fetch Data] 通信量を抑えるため最新1000件を制限取得中... パス: ${monthTag}`);
-    } else {
-        console.log(`[Fetch Data] 全期間データを詳細解析するため全件同期中... パス: ${monthTag}`);
+        dbRef = dbRef.limitToLast(1000);
     }
-    
+
     try {
-        const res = await fetch(url);
-        const json = await res.json();
-        if(!json) {
-            console.log("[Fetch Data] データベース内に対象月のデータレコードが存在しません。");
-            fullData = [];
+        dbRef.once('value', (snapshot) => {
+            const json = snapshot.val();
+            if(!json) {
+                console.log("[Fetch Data] データレコードが存在しません。");
+                fullData = [];
+                applyFilter();
+                return;
+            }
+            fullData = Object.values(json).map(d => ({ ...d, _ts: parseTS(d.date, d.time) })).sort((a,b)=>a._ts - b._ts);
+            console.log(`[Fetch Data] ロード完了。総件数: ${fullData.length} 件`);
             applyFilter();
-            return;
-        }
-        fullData = Object.values(json).map(d => ({ ...d, _ts: parseTS(d.date, d.time) })).sort((a,b)=>a._ts - b._ts);
-        console.log(`[Fetch Data] ロード完了。読み込み成功件数: ${fullData.length} 件`);
-        applyFilter();
-    } catch(e) { console.error("[Fetch Error] 通信エラーが発生しました。理由:", e); }
+        }, (error) => {
+            console.error("[Fetch Error] データベースの読み込み権限がありません(Permission Denied)。セキュリティルールとUIDが一致しているか確認してください。理由:", error.message);
+        });
+    } catch(e) { console.error("[Fetch Error] 通信エラーが発生しました。:", e); }
 }
 
-// 修正仕様：指定された期間範囲データ（特に終了日時）を基準にして、過去方向へ最大1,000件を抽出する
 function applyFilter() {
     const sT = document.getElementById('start').value ? new Date(document.getElementById('start').value).getTime() : 0;
     const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
     
-    // 1. まず指定された期間（開始～終了）の枠内に収まるデータをタイムスタンプ順で抽出
     let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
     console.log(`[Filter] 日時指定範囲内の該当総件数: ${filtered.length} 件`);
     
-    // 2. 抽出された配列は古い順にソートされているため、末尾（＝終了日時に最も近いデータ）から
-    // 過去へ遡って最大1000件を切り出します。(.slice(-1000) は配列の末尾から1000件を取得します)
     const displayList = filtered.slice(-1000); 
-    console.log(`[Filter] 終了日時から過去へ遡り、最大 ${displayList.length} 件をグラフ表示対象に確定しました。`);
+    console.log(`[Filter] 表示対象確定件数: ${displayList.length} 件`);
     
     const tbody = document.getElementById('tbl'); let h = '';
-    // テーブル表示は直近に測定されたデータ（日時が新しいデータ）が上にくるように反転してレンダリング
     displayList.slice().reverse().forEach(d => {
         h += `<tr><td>${d.date}</td><td>${d.time}</td><td>${d.device}</td><td>${Number(d.temp).toFixed(2)}</td><td>${Number(d.hum).toFixed(2)}</td><td>${Number(d.pres).toFixed(1)}</td><td>${d.rssi||'-'}</td></tr>`;
     });
@@ -163,7 +216,6 @@ function updateChart(data) {
         groups[d.device].vals[lbl] = d[currentType];
     });
     const labels = Array.from(labelSet);
-    
     const sortedDevices = Object.keys(groups).sort();
 
     const datasets = sortedDevices.map((dev, index) => {
@@ -184,9 +236,8 @@ function updateChart(data) {
     });
 }
 
-// 初期化起動処理
-loadData(false);     
-startAutoTimer();    
+// 最初の起動トリガー（Googleログイン認証を開始）
+handleAuth();     
 </script>
 </body>
 </html>
