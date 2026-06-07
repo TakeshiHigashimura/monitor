@@ -58,9 +58,9 @@
 // ⚙️ Firebase 初期設定（あなたの環境に合わせて書き換えてください）
 // ============================================================
 const firebaseConfig = {
-  apiKey: "あなたの新しいWEB_API_KEY",
-  authDomain: "あなたのプロジェクトID.firebaseapp.com",
-  projectId: "あなたのプロジェクトID",
+  apiKey: "AIzaSyBohUK1jQ231YUuENWujXiAFeW4exGWAhc",
+  authDomain: "enviroment-monitor-29c36.firebaseapp.com",
+  projectId: "enviroment-monitor-29c36",
   databaseURL: "https://enviroment-monitor-29c36-default-rtdb.asia-southeast1.firebasedatabase.app" // ご提示のURL
 };
 firebase.initializeApp(firebaseConfig);
@@ -95,7 +95,7 @@ function handleAuth() {
       
       // ポップアップでGoogleログインを実行
       const provider = new firebase.auth.GoogleAuthProvider();
-      firebase.auth().signInWithPopup(provider)
+      firebase.auth().signInWithRedirect(provider)
         .catch((error) => {
           console.error("[Auth] ログインエラー:", error.message);
           alert("ログインに失敗しました。閲覧するにはGoogle認証が必要です。\n理由: " + error.message);
