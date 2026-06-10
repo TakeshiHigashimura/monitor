@@ -118,7 +118,7 @@ function initFirebase(key, id, url) {
   };
   firebase.initializeApp(firebaseConfig);
 
-  // Google認証リダイレクト処理
+// Google認証リダイレクト処理
   firebase.auth().onAuthStateChanged((user) => {
     if (user) {
       console.log("[Auth] ログイン成功:", user.email);
@@ -127,13 +127,18 @@ function initFirebase(key, id, url) {
       loadData(false);     
       startAutoTimer();    
     } else {
-      document.getElementById("auth-status").innerText = "🔒 未認証 (ログイン中...)";
-      const provider = new firebase.auth.GoogleAuthProvider();
-      // ⭕ マカフィーにブロックされない「画面切り替え方式」
-      firebase.auth().signInWithRedirect(provider);
+      // 🌟【ここを追加】Googleから戻ってきた判定中の場合は、二重でログイン処理を走らせない
+      firebase.auth().getRedirectResult().then((result) => {
+        if (!result.user && !firebase.auth().currentUser) {
+          document.getElementById("auth-status").innerText = "🔒 未認証 (ログイン中...)";
+          const provider = new firebase.auth.GoogleAuthProvider();
+          firebase.auth().signInWithRedirect(provider);
+        }
+      }).catch((error) => {
+        console.error("[Auth] リダイレクト処理エラー:", error.message);
+      });
     }
   });
-}
 
 // （以下、データ読み込みやグラフ描画のロジックは以前のまま維持されます...）
 async function loadData(fetchAll = false) {
