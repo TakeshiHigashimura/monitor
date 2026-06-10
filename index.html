@@ -19,13 +19,12 @@
   button.active{background:#007bff;color:#fff;border-color:#0056b3;}
   .btn-toggle-auto { background:#e3f2fd; color:#0056b3; font-weight:bold; border-color:#b3e5fc; }
   
-  /* 設定入力エリアのスタイル */
   .setup-overlay { position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center; }
   .setup-box { background:#fff; padding:30px; border-radius:8px; width:450px; box-shadow:0 4px 15px rgba(0,0,0,0.3); }
   .setup-box h3 { margin-top:0; color:#333; }
   .setup-box label { display:block; margin:12px 0 4px; font-weight:bold; font-size:13px; }
   .setup-box input { width:100%; padding:8px; box-sizing:border-box; border:1px solid #ccc; border-radius:4px; font-family:monospace; }
-  .setup-box button { width:100%; margin-top:20px; padding:10px; background:#007bff; color:#fff; border:none; font-weight:bold; font-size:15px; }
+  .setup-box button { width:100%; margin-top:20px; padding:10px; background:#007bff; color:#fff; border:none; font-weight:bold; font-size:15px; cursor:pointer;}
 
   #chart-container{position:relative; width:99vw; height:70vh; background:#fff; margin:5px auto; padding:10px; box-sizing:border-box; border:1px solid #ddd; border-radius:8px;}
   .table-outer{width:100%; display:flex; justify-content:center;}
@@ -80,13 +79,11 @@ function parseTS(dStr, tStr) { const d = dStr.split('/'); const t = tStr.split('
 
 // 🚀 画面起動時の処理
 window.onload = function() {
-  // ブラウザの記憶（LocalStorage）から過去に入力したキーがあるか探す
   const savedKey = localStorage.getItem("env_api_key");
   const savedId = localStorage.getItem("env_proj_id");
   const savedUrl = localStorage.getItem("env_db_url");
 
   if (savedKey && savedId && savedUrl) {
-    // 記憶があれば、入力画面を非表示にして自動接続
     document.getElementById("setup-screen").style.display = "none";
     initFirebase(savedKey, savedId, savedUrl);
   }
@@ -98,17 +95,27 @@ function saveAndConnect() {
   const id = document.getElementById("cfg-id").value.trim();
   const url = document.getElementById("cfg-url").value.trim();
 
-  if(!key || !id || !url) { alert("すべての項目を入力してください。"); return; }
+  if(!key || !id || !url) { 
+    alert("すべての項目を入力してください。"); 
+    return; 
+  }
 
-  localStorage.setItem("env_api_key", key);
-  localStorage.setItem("env_proj_id", id);
-  localStorage.setItem("env_db_url", url);
+  localStorage.clear();
 
-  document.getElementById("setup-screen").style.display = "none";
-  initFirebase(key, id, url);
+  try {
+    localStorage.setItem("env_api_key", key);
+    localStorage.setItem("env_proj_id", id);
+    localStorage.setItem("env_db_url", url);
+
+    console.log("[Setup] 設定をブラウザに記憶しました。");
+    document.getElementById("setup-screen").style.display = "none";
+    initFirebase(key, id, url);
+  } catch(e) {
+    alert("保存エラー: " + e.message);
+  }
 }
 
-// ⚙️ Firebaseの初期化とGoogleログイン処理（Redirect方式でマカフィー回避）
+// ⚙️ Firebaseの初期化とGoogleログイン処理
 function initFirebase(key, id, url) {
   const firebaseConfig = {
     apiKey: key,
@@ -118,7 +125,7 @@ function initFirebase(key, id, url) {
   };
   firebase.initializeApp(firebaseConfig);
 
-// Google認証リダイレクト処理
+  // Google認証リダイレクト無限ループ対策版
   firebase.auth().onAuthStateChanged((user) => {
     if (user) {
       console.log("[Auth] ログイン成功:", user.email);
@@ -127,7 +134,6 @@ function initFirebase(key, id, url) {
       loadData(false);     
       startAutoTimer();    
     } else {
-      // 🌟【ここを追加】Googleから戻ってきた判定中の場合は、二重でログイン処理を走らせない
       firebase.auth().getRedirectResult().then((result) => {
         if (!result.user && !firebase.auth().currentUser) {
           document.getElementById("auth-status").innerText = "🔒 未認証 (ログイン中...)";
@@ -135,12 +141,12 @@ function initFirebase(key, id, url) {
           firebase.auth().signInWithRedirect(provider);
         }
       }).catch((error) => {
-        console.error("[Auth] リダイレクト処理エラー:", error.message);
+        console.error("[Auth] リダイレクトエラー:", error.message);
       });
     }
   });
+}
 
-// （以下、データ読み込みやグラフ描画のロジックは以前のまま維持されます...）
 async function loadData(fetchAll = false) {
     if (!firebase.auth().currentUser) return;
     const now = new Date();
@@ -182,12 +188,16 @@ function toggleUpdateMode() {
         loadData(false); startAutoTimer();
     }
 }
+
 function triggerManualFetch() { loadData(true); }
+
 function startAutoTimer() {
     if (refreshIntervalId) clearInterval(refreshIntervalId);
     refreshIntervalId = setInterval(() => { if (isAutoMode && firebase.auth().currentUser) loadData(false); }, 60000);
 }
+
 function changeType(t){ currentType = t; applyFilter(); }
+
 function updateChart(data) {
     ['temp','hum','pres'].forEach(t => document.getElementById('btn_'+t).className = (t===currentType)?'active':'');
     if(chart) chart.destroy(); if(data.length === 0) return;
