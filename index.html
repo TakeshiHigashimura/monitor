@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>CLOUD MONITOR (TOTAL SECURE)</title>
+<title>CLOUD MONITOR (TOTAL SECURE V2)</title>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -17,7 +17,6 @@
   .mode-divider{width:1px; height:20px; background:#ccc; margin:0 8px;}
   button{margin:0 3px;padding:6px 15px;font-size:14px;cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:4px;}
   button.active{background:#007bff;color:#fff;border-color:#0056b3;}
-  .btn-toggle-auto { background:#e3f2fd; color:#0056b3; font-weight:bold; border-color:#b3e5fc; }
   
   .setup-overlay { position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center; }
   .setup-box { background:#fff; padding:30px; border-radius:8px; width:450px; box-shadow:0 4px 15px rgba(0,0,0,0.3); }
@@ -39,17 +38,10 @@
 <div id="setup-screen" class="setup-overlay">
   <div class="setup-box">
     <h3>🔒 個人認証（Firebase接続設定）</h3>
-    <p style="font-size:12px; color:#666; margin:0;">この設定はブラウザに安全に記憶されるため、入力は最初の1回だけです。GitHubには一切保存されません。</p>
-    
-    <label>1. ウェブ API キー (apiKey)</label>
-    <input type="text" id="cfg-key" placeholder="AIzaSy...">
-    
-    <label>2. プロジェクト ID (projectId)</label>
-    <input type="text" id="cfg-id" placeholder="enviroment-monitor-xxxxx">
-    
-    <label>3. データベース URL (databaseURL)</label>
-    <input type="text" id="cfg-url" placeholder="https://...firebasedatabase.app">
-    
+    <p style="font-size:12px; color:#666; margin:0;">キャッシュクリアされたため再度入力してください。GitHubには保存されません。</p>
+    <label>1. ウェブ API キー (apiKey)</label><input type="text" id="cfg-key" placeholder="AIzaSy...">
+    <label>2. プロジェクト ID (projectId)</label><input type="text" id="cfg-id" placeholder="enviroment-monitor-xxxxx">
+    <label>3. データベース URL (databaseURL)</label><input type="text" id="cfg-url" placeholder="https://...firebasedatabase.app">
     <button onclick="saveAndConnect()">接続して記憶する</button>
   </div>
 </div>
@@ -63,7 +55,7 @@
     <button id="btn_hum" onclick="changeType('hum')">湿度(%)</button>
     <button id="btn_pres" onclick="changeType('pres')">気圧(hPa)</button>
     <div class="mode-divider"></div>
-    <button id="btn_mode_switch" class="btn-toggle-auto" onclick="toggleUpdateMode()">更新モード: 自動</button>
+    <button id="btn_mode_switch" style="background:#e3f2fd; color:#0056b3; font-weight:bold;" onclick="toggleUpdateMode()">更新モード: 自動</button>
     <button id="btn_manual_fetch" style="background:#28a745;color:#fff;display:none;" onclick="triggerManualFetch()">最新データ読込 ↻</button>
   </div>
 </div>
@@ -77,55 +69,42 @@ const PRESET_COLORS = ['#3498db', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#
 
 function parseTS(dStr, tStr) { const d = dStr.split('/'); const t = tStr.split(':'); return new Date(d[0], d[1]-1, d[2], t[0], t[1], t[2]).getTime(); }
 
-// 🚀 画面起動時の処理
 window.onload = function() {
   const savedKey = localStorage.getItem("env_api_key");
   const savedId = localStorage.getItem("env_proj_id");
   const savedUrl = localStorage.getItem("env_db_url");
 
-  if (savedKey && savedId && savedUrl) {
-    document.getElementById("setup-screen").style.display = "none";
-    initFirebase(savedKey, savedId, savedUrl);
+  // 🌟ガード強化：どれか一つでも空っぽなら、必ず初期設定画面を表示して処理を止める
+  if (!savedKey || !savedId || !savedUrl) {
+    document.getElementById("setup-screen").style.display = "flex";
+    document.getElementById("auth-status").innerText = "🔒 初期設定が必要です";
+    return; 
   }
+
+  document.getElementById("setup-screen").style.display = "none";
+  initFirebase(savedKey, savedId, savedUrl);
 };
 
-// 💾 ボタンを押した時にキーをブラウザに記憶して接続する処理
 function saveAndConnect() {
   const key = document.getElementById("cfg-key").value.trim();
   const id = document.getElementById("cfg-id").value.trim();
   const url = document.getElementById("cfg-url").value.trim();
 
-  if(!key || !id || !url) { 
-    alert("すべての項目を入力してください。"); 
-    return; 
-  }
-
+  if(!key || !id || !url) { alert("すべての項目を入力してください。"); return; }
   localStorage.clear();
-
   try {
     localStorage.setItem("env_api_key", key);
     localStorage.setItem("env_proj_id", id);
     localStorage.setItem("env_db_url", url);
-
-    console.log("[Setup] 設定をブラウザに記憶しました。");
     document.getElementById("setup-screen").style.display = "none";
     initFirebase(key, id, url);
-  } catch(e) {
-    alert("保存エラー: " + e.message);
-  }
+  } catch(e) { alert("保存エラー: " + e.message); }
 }
 
-// ⚙️ Firebaseの初期化とGoogleログイン処理
 function initFirebase(key, id, url) {
-  const firebaseConfig = {
-    apiKey: key,
-    authDomain: `${id}.firebaseapp.com`,
-    projectId: id,
-    databaseURL: url
-  };
+  const firebaseConfig = { apiKey: key, authDomain: `${id}.firebaseapp.com`, projectId: id, databaseURL: url };
   firebase.initializeApp(firebaseConfig);
 
-  // Google認証リダイレクト無限ループ対策版
   firebase.auth().onAuthStateChanged((user) => {
     if (user) {
       console.log("[Auth] ログイン成功:", user.email);
@@ -147,13 +126,13 @@ function initFirebase(key, id, url) {
   });
 }
 
+// （以下、データ読み込みやグラフ描画のロジックは維持されます...）
 async function loadData(fetchAll = false) {
     if (!firebase.auth().currentUser) return;
     const now = new Date();
     const monthTag = `log_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}`;
     let dbRef = firebase.database().ref(monthTag);
     if (!fetchAll) dbRef = dbRef.limitToLast(1000);
-
     try {
         dbRef.once('value', (snapshot) => {
             const json = snapshot.val();
@@ -163,7 +142,6 @@ async function loadData(fetchAll = false) {
         });
     } catch(e) { console.error(e); }
 }
-
 function applyFilter() {
     const sT = document.getElementById('start').value ? new Date(document.getElementById('start').value).getTime() : 0;
     const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
@@ -173,10 +151,8 @@ function applyFilter() {
     displayList.slice().reverse().forEach(d => {
         h += `<tr><td>${d.date}</td><td>${d.time}</td><td>${d.device}</td><td>${Number(d.temp).toFixed(2)}</td><td>${Number(d.hum).toFixed(2)}</td><td>${Number(d.pres).toFixed(1)}</td><td>${d.rssi||'-'}</td></tr>`;
     });
-    tbody.innerHTML = h;
-    updateChart(displayList);
+    tbody.innerHTML = h; updateChart(displayList);
 }
-
 function toggleUpdateMode() {
     const switchBtn = document.getElementById('btn_mode_switch');
     const fetchBtn = document.getElementById('btn_manual_fetch');
@@ -188,16 +164,12 @@ function toggleUpdateMode() {
         loadData(false); startAutoTimer();
     }
 }
-
 function triggerManualFetch() { loadData(true); }
-
 function startAutoTimer() {
     if (refreshIntervalId) clearInterval(refreshIntervalId);
     refreshIntervalId = setInterval(() => { if (isAutoMode && firebase.auth().currentUser) loadData(false); }, 60000);
 }
-
 function changeType(t){ currentType = t; applyFilter(); }
-
 function updateChart(data) {
     ['temp','hum','pres'].forEach(t => document.getElementById('btn_'+t).className = (t===currentType)?'active':'');
     if(chart) chart.destroy(); if(data.length === 0) return;
