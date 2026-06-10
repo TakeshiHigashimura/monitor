@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>CLOUD MONITOR (FINAL SECURE)</title>
+<title>CLOUD MONITOR (FINAL SECURE V3)</title>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -69,25 +69,28 @@
 
 <script>
 let chart = null; let currentType = 'temp'; let fullData = [];
-// 🌟 1. 初期状態を「手動モード(false)」に変更
 let isAutoMode = false; let refreshIntervalId = null;
 const PRESET_COLORS = ['#3498db', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22', '#34495e'];
 
 function parseTS(dStr, tStr) { const d = dStr.split('/'); const t = tStr.split(':'); return new Date(d[0], d[1]-1, d[2], t[0], t[1], t[2]).getTime(); }
 
 window.onload = function() {
-  const savedKey = localStorage.getItem("env_api_key");
-  const savedId = localStorage.getItem("env_proj_id");
-  const savedUrl = localStorage.getItem("env_db_url");
+  try {
+    const savedKey = localStorage.getItem("env_api_key");
+    const savedId = localStorage.getItem("env_proj_id");
+    const savedUrl = localStorage.getItem("env_db_url");
 
-  if (!savedKey || !savedId || !savedUrl) {
-    document.getElementById("setup-screen").style.display = "flex";
-    document.getElementById("auth-status").innerText = "🔒 初期設定が必要です";
-    return; 
+    if (!savedKey || !savedId || !savedUrl) {
+      document.getElementById("setup-screen").style.display = "flex";
+      document.getElementById("auth-status").innerText = "🔒 初期設定が必要です";
+      return; 
+    }
+
+    document.getElementById("setup-screen").style.display = "none";
+    initFirebase(savedKey, savedId, savedUrl);
+  } catch(e) {
+    alert("起動時にエラーが発生しました: " + e.message);
   }
-
-  document.getElementById("setup-screen").style.display = "none";
-  initFirebase(savedKey, savedId, savedUrl);
 };
 
 function saveAndConnect() {
@@ -96,42 +99,129 @@ function saveAndConnect() {
   const url = document.getElementById("cfg-url").value.trim();
 
   if(!key || !id || !url) { alert("すべての項目を入力してください。"); return; }
-  localStorage.clear();
+  
   try {
+    localStorage.clear();
     localStorage.setItem("env_api_key", key);
     localStorage.setItem("env_proj_id", id);
     localStorage.setItem("env_db_url", url);
     document.getElementById("setup-screen").style.display = "none";
     initFirebase(key, id, url);
-  } catch(e) { alert("保存エラー: " + e.message); }
+  } catch(e) { 
+    alert("ブラウザへの保存エラー: " + e.message); 
+  }
 }
 
 function initFirebase(key, id, url) {
-  const firebaseConfig = { apiKey: key, authDomain: `${id}.firebaseapp.com`, projectId: id, databaseURL: url };
-  firebase.initializeApp(firebaseConfig);
+  try {
+    const firebaseConfig = { apiKey: key, authDomain: `${id}.firebaseapp.com`, projectId: id, databaseURL: url };
+    firebase.initializeApp(firebaseConfig);
 
-  firebase.auth().onAuthStateChanged((user) => {
-    if (user) {
-      console.log("[Auth] ログイン成功:", user.email);
-      document.getElementById("btn-login").style.display = "none";
-      document.getElementById("auth-status").innerText = `👤 ${user.displayName} (接続済)`;
-      document.getElementById("auth-status").style.color = "#28a745";
-      loadData(false);     
-      
-      // 🌟 2. ログイン完了時に最初から「手動モード」のボタン状態（緑色の読込ボタン出現）にする
-      const switchBtn = document.getElementById('btn_mode_switch');
-      const fetchBtn = document.getElementById('btn_manual_fetch');
-      switchBtn.innerText = "更新モード: 手動";
-      switchBtn.style.background = "#fff";
-      switchBtn.style.color = "#333";
-      fetchBtn.style.display = "inline-block";
-    } else {
-      document.getElementById("auth-status").innerText = "🔒 未認証 (ロック中)";
-      document.getElementById("auth-status").style.color = "#dc3545";
-      document.getElementById("btn-login").style.display = "inline-block";
-    }
-  });
+    firebase.auth().onAuthStateChanged((user) => {
+      try {
+        if (user) {
+          console.log("[Auth] ログイン成功:", user.email);
+          document.getElementById("btn-login").style.display = "none";
+          document.getElementById("auth-status").innerText = `👤 ${user.displayName} (接続済)`;
+          document.getElementById("auth-status").style.color = "#28a745";
+          loadData(false);     
+          
+          // 🛠️ 修正箇所：ボタン要素を正しく取得して手動モードの見た目に変更
+          const switchBtn = document.getElementById('btn_mode_switch');
+          const fetchBtn = document.getElementById('btn_manual_fetch');
+          if (switchBtn && fetchBtn) {
+            switchBtn.innerText = "更新モード: 手動";
+            switchBtn.style.background = "#fff";
+            switchBtn.style.color = "#333";
+            fetchBtn.style.display = "inline-block";
+          }
+        } else {
+          document.getElementById("auth-status").innerText = "🔒 未認証 (ロック中)";
+          document.getElementById("auth-status").style.color = "#dc3545";
+          document.getElementById("btn-login").style.display = "inline-block";
+        }
+      } catch(innerErr) {
+        alert("ログイン状態処理エラー: " + innerErr.message);
+      }
+    });
+  } catch(e) {
+    alert("Firebase初期化エラー (入力された値が不正な可能性があります): " + e.message);
+  }
 }
 
 function loginWithPopup() {
   const provider = new firebase.auth.GoogleAuthProvider();
+  firebase.auth().signInWithPopup(provider)
+    .catch((error) => {
+      console.error("[Auth] ログインエラー:", error.message);
+      alert("ログイン失敗: " + error.message);
+    });
+}
+
+async function loadData(fetchAll = false) {
+    if (!firebase.auth().currentUser) return;
+    const now = new Date();
+    const monthTag = `log_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}`;
+    let dbRef = firebase.database().ref(monthTag);
+    if (!fetchAll) dbRef = dbRef.limitToLast(1000);
+    try {
+        dbRef.once('value', (snapshot) => {
+            const json = snapshot.val();
+            if(!json) { fullData = []; applyFilter(); return; }
+            fullData = Object.values(json).map(d => ({ ...d, _ts: parseTS(d.date, d.time) })).sort((a,b)=>a._ts - b._ts);
+            applyFilter();
+        });
+    } catch(e) { console.error(e); }
+}
+
+function applyFilter() {
+    const sT = document.getElementById('start').value ? new Date(document.getElementById('start').value).getTime() : 0;
+    const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
+    let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
+    const displayList = filtered.slice(-1000); 
+    const tbody = document.getElementById('tbl'); let h = '';
+    displayList.slice().reverse().forEach(d => {
+        h += `<tr><td>${d.date}</td><td>${d.time}</td><td>${d.device}</td><td>${Number(d.temp).toFixed(2)}</td><td>${Number(d.hum).toFixed(2)}</td><td>${Number(d.pres).toFixed(1)}</td><td>${d.rssi||'-'}</td></tr>`;
+    });
+    tbody.innerHTML = h; updateChart(displayList);
+}
+
+function toggleUpdateMode() {
+    const switchBtn = document.getElementById('btn_mode_switch');
+    const fetchBtn = document.getElementById('btn_manual_fetch');
+    if (isAutoMode) {
+        isAutoMode = false; switchBtn.innerText = "更新モード: 手動"; switchBtn.style.background = "#fff"; switchBtn.style.color = "#333"; fetchBtn.style.display = "inline-block";
+        if (refreshIntervalId) { clearInterval(refreshIntervalId); refreshIntervalId = null; }
+    } else {
+        isAutoMode = true; switchBtn.innerText = "更新モード: 自動"; switchBtn.style.background = "#e3f2fd"; switchBtn.style.color = "#0056b3"; fetchBtn.style.display = "none";
+        loadData(false); startAutoTimer();
+    }
+}
+
+function triggerManualFetch() { loadData(true); }
+
+function startAutoTimer() {
+    if (refreshIntervalId) clearInterval(refreshIntervalId);
+    refreshIntervalId = setInterval(() => { if (isAutoMode && firebase.auth().currentUser) loadData(false); }, 60000);
+}
+
+function changeType(t){ currentType = t; applyFilter(); }
+
+function updateChart(data) {
+    ['temp','hum','pres'].forEach(t => document.getElementById('btn_'+t).className = (t===currentType)?'active':'');
+    if(chart) chart.destroy(); if(data.length === 0) return;
+    const labelSet = new Set(); const groups = {};
+    data.forEach(d => {
+        const lbl = d.date.split('/').slice(1).join('/') + " " + d.time.slice(0,5);
+        labelSet.add(lbl); if(!groups[d.device]) groups[d.device] = {vals:{}}; groups[d.device].vals[lbl] = d[currentType];
+    });
+    const labels = Array.from(labelSet); const sortedDevices = Object.keys(groups).sort();
+    const datasets = sortedDevices.map((dev, index) => {
+        const color = PRESET_COLORS[index % PRESET_COLORS.length];
+        return { label: dev, data: labels.map(l => groups[dev].vals[l] || null), borderColor: color, backgroundColor: color, tension: 0.1, spanGaps: true };
+    });
+    chart = new Chart(document.getElementById('chart'), { type: 'line', data: {labels, datasets}, options: { responsive: true, maintainAspectRatio: false, animation: false } });
+}
+</script>
+</body>
+</html>
