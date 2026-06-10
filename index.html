@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>CLOUD MONITOR (TOTAL SECURE V2)</title>
+<title>CLOUD MONITOR (FINAL SECURE)</title>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -18,6 +18,10 @@
   button{margin:0 3px;padding:6px 15px;font-size:14px;cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:4px;}
   button.active{background:#007bff;color:#fff;border-color:#0056b3;}
   
+  /* 🔓 ログインボタンを目立たせるスタイル */
+  .btn-login-trigger { background:#dc3545; color:#fff; font-weight:bold; border-color:#bd2130; }
+  .btn-login-trigger:hover { background:#bd2130; }
+
   .setup-overlay { position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.8); z-index:9999; display:flex; justify-content:center; align-items:center; }
   .setup-box { background:#fff; padding:30px; border-radius:8px; width:450px; box-shadow:0 4px 15px rgba(0,0,0,0.3); }
   .setup-box h3 { margin-top:0; color:#333; }
@@ -38,7 +42,7 @@
 <div id="setup-screen" class="setup-overlay">
   <div class="setup-box">
     <h3>🔒 個人認証（Firebase接続設定）</h3>
-    <p style="font-size:12px; color:#666; margin:0;">キャッシュクリアされたため再度入力してください。GitHubには保存されません。</p>
+    <p style="font-size:12px; color:#666; margin:0;">3つの情報を入力してください。GitHubには保存されません。</p>
     <label>1. ウェブ API キー (apiKey)</label><input type="text" id="cfg-key" placeholder="AIzaSy...">
     <label>2. プロジェクト ID (projectId)</label><input type="text" id="cfg-id" placeholder="enviroment-monitor-xxxxx">
     <label>3. データベース URL (databaseURL)</label><input type="text" id="cfg-url" placeholder="https://...firebasedatabase.app">
@@ -50,7 +54,9 @@
   <div class="filter-box">開始:<input type="datetime-local" id="start"> ～ 終了:<input type="datetime-local" id="end"><button onclick="applyFilter()" style="background:#28a745;color:white;border:none;">適用</button></div>
   <h2>クラウド環境モニター</h2>
   <div class="controls">
+    <button id="btn-login" class="btn-login-trigger" style="display:none;" onclick="loginWithPopup()">Googleログイン鍵解除 🔓</button>
     <span id="auth-status" style="font-size:12px; color:#555; margin-right:10px; font-weight:bold;">認証確認中...</span>
+    
     <button id="btn_temp" onclick="changeType('temp')">温度(℃)</button>
     <button id="btn_hum" onclick="changeType('hum')">湿度(%)</button>
     <button id="btn_pres" onclick="changeType('pres')">気圧(hPa)</button>
@@ -74,7 +80,6 @@ window.onload = function() {
   const savedId = localStorage.getItem("env_proj_id");
   const savedUrl = localStorage.getItem("env_db_url");
 
-  // 🌟ガード強化：どれか一つでも空っぽなら、必ず初期設定画面を表示して処理を止める
   if (!savedKey || !savedId || !savedUrl) {
     document.getElementById("setup-screen").style.display = "flex";
     document.getElementById("auth-status").innerText = "🔒 初期設定が必要です";
@@ -105,28 +110,35 @@ function initFirebase(key, id, url) {
   const firebaseConfig = { apiKey: key, authDomain: `${id}.firebaseapp.com`, projectId: id, databaseURL: url };
   firebase.initializeApp(firebaseConfig);
 
+  // 🌟 自動リダイレクト（無限ループの元）を完全に廃止
   firebase.auth().onAuthStateChanged((user) => {
     if (user) {
       console.log("[Auth] ログイン成功:", user.email);
+      document.getElementById("btn-login").style.display = "none"; // ログインできたらボタンを隠す
       document.getElementById("auth-status").innerText = `👤 ${user.displayName} (接続済)`;
       document.getElementById("auth-status").style.color = "#28a745";
       loadData(false);     
       startAutoTimer();    
     } else {
-      firebase.auth().getRedirectResult().then((result) => {
-        if (!result.user && !firebase.auth().currentUser) {
-          document.getElementById("auth-status").innerText = "🔒 未認証 (ログイン中...)";
-          const provider = new firebase.auth.GoogleAuthProvider();
-          firebase.auth().signInWithRedirect(provider);
-        }
-      }).catch((error) => {
-        console.error("[Auth] リダイレクトエラー:", error.message);
-      });
+      // 未ログインなら、ボタンを表示してユーザーのクリックを待つ
+      document.getElementById("auth-status").innerText = "🔒 未認証 (ロック中)";
+      document.getElementById("auth-status").style.color = "#dc3545";
+      document.getElementById("btn-login").style.display = "inline-block";
     }
   });
 }
 
-// （以下、データ読み込みやグラフ描画のロジックは維持されます...）
+// 🌟 人間がクリックした時だけ安全にポップアップを起動する関数
+function loginWithPopup() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  firebase.auth().signInWithPopup(provider)
+    .catch((error) => {
+      console.error("[Auth] ログインエラー:", error.message);
+      alert("ログイン失敗: " + error.message);
+    });
+}
+
+// （以下、データロジックはそのまま維持されます）
 async function loadData(fetchAll = false) {
     if (!firebase.auth().currentUser) return;
     const now = new Date();
