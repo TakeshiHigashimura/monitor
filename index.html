@@ -50,7 +50,7 @@
 </div>
 
 <div class="header-row">
-  <div class="filter-box">開始:<input type="datetime-local" id="start"> ～ 終了:<input type="datetime-local" id="end"><button onclick="applyFilter()" style="background:#28a745;color:white;border:none;">適用</button></div>
+  <div class="filter-box">開始:<input type="datetime-local" id="start"> ～ 終了:<input type="datetime-local" id="end"><button onclick="triggerManualFetch()" style="background:#28a745;color:white;border:none;">適用</button></div>
   <h2>クラウド環境モニター</h2>
   <div class="controls">
     <button id="btn-login" class="btn-login-trigger" style="display:none;" onclick="loginWithPopup()">Googleログイン鍵解除 🔓</button>
@@ -124,9 +124,8 @@ function initFirebase(key, id, url) {
           document.getElementById("btn-login").style.display = "none";
           document.getElementById("auth-status").innerText = `👤 ${user.displayName} (接続済)`;
           document.getElementById("auth-status").style.color = "#28a745";
-          loadData(false);     
+          loadData();     
           
-          // 🛠️ 修正箇所：ボタン要素を正しく取得して手動モードの見た目に変更
           const switchBtn = document.getElementById('btn_mode_switch');
           const fetchBtn = document.getElementById('btn_manual_fetch');
           if (switchBtn && fetchBtn) {
@@ -158,26 +157,99 @@ function loginWithPopup() {
     });
 }
 
+// 🌟【重要】階層構造化対応 ＆ 動的ターゲット条件分岐読込ロジック
 async function loadData(fetchAll = false) {
     if (!firebase.auth().currentUser) return;
-    const now = new Date();
-    const monthTag = `log_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}`;
-    let dbRef = firebase.database().ref(monthTag);
-    if (!fetchAll) dbRef = dbRef.limitToLast(1000);
-    try {
-        dbRef.once('value', (snapshot) => {
+    
+    const startInput = document.getElementById('start').value;
+    const endInput = document.getElementById('end').value;
+    let flatList = [];
+
+    // ─── パターンA：期間指定がない場合（当日フォルダのみを正確にピンポイント狙い撃ち） ───
+    if (!startInput && !endInput) {
+        const now = new Date();
+        const y = now.getFullYear().toString();
+        const m = (now.getMonth() + 1).toString().padStart(2, '0');
+        const d = now.getDate().toString().padStart(2, '0');
+        
+        console.log(`[Fetch] 期間未指定のため、本日フォルダのみを高速シークします: /${y}/${m}/${d}`);
+        let dbRef = firebase.database().ref(`${y}/${m}/${d}`);
+        
+        // 自動モードまたは引数指示がない通常時は最新1000件リミット制限
+        if (!fetchAll) dbRef = dbRef.limitToLast(1000);
+        
+        try {
+            const snapshot = await dbRef.once('value');
             const json = snapshot.val();
-            if(!json) { fullData = []; applyFilter(); return; }
-            fullData = Object.values(json).map(d => ({ ...d, _ts: parseTS(d.date, d.time) })).sort((a,b)=>a._ts - b._ts);
-            applyFilter();
+            if (json) {
+                flatList = Object.values(json);
+            }
+        } catch(e) {
+            console.error("[Fetch] 当日データアクセスに失敗しました:", e);
+        }
+    } 
+    // ─── パターンB：期間指定がある場合（フォルダを跨いで必要日のみ高効率スキャン） ───
+    else {
+        const sMS = startInput ? new Date(startInput).getTime() : 0;
+        const eMS = endInput ? new Date(endInput).getTime() : Infinity;
+        
+        console.log(`[Fetch] 期間指定あり。フォルダ跨ぎ解析を開始します。 始点:${startInput} 終点:${endInput}`);
+        
+        // ループ走査の安全な基準ミリ秒を決定
+        let currentLoopMS = sMS === 0 ? (eMS === Infinity ? new Date().getTime() : eMS) - (7 * 24 * 60 * 60 * 1000) : sMS; 
+        const maxEndMS = eMS === Infinity ? new Date().getTime() : eMS;
+        
+        // 過大なメモリ・通信バーストを防ぐためのセーフティ（最大スキャン範囲を約31日分にクランプ）
+        const limitLoopMS = Math.min(maxEndMS, currentLoopMS + (31 * 24 * 60 * 60 * 1000));
+        
+        const targetPaths = [];
+        let dLoop = new Date(currentLoopMS);
+        const dEnd = new Date(limitLoopMS);
+        
+        // 1日刻みでカレンダーを進め、走査に必要な『年/月/日』のデータベースパス群を検出
+        while (dLoop <= dEnd) {
+            const y = dLoop.getFullYear().toString();
+            const m = (dLoop.getMonth() + 1).toString().padStart(2, '0');
+            const d = dLoop.getDate().toString().padStart(2, '0');
+            const pathStr = `${y}/${m}/${d}`;
+            if (!targetPaths.includes(pathStr)) targetPaths.push(pathStr);
+            dLoop.setDate(dLoop.getDate() + 1);
+        }
+        
+        console.log("[Fetch] スキャン対象となる階層フォルダリスト:", targetPaths);
+
+        // リストアップした全日付フォルダへ非同期・並列同時リクエストを投げて高速に回収
+        const fetchPromises = targetPaths.map(async (path) => {
+            try {
+                const snap = await firebase.database().ref(path).once('value');
+                const val = snap.val();
+                return val ? Object.values(val) : [];
+            } catch(pathErr) {
+                console.warn(`[Fetch] フォルダ [${path}] の読み込みにスキップが発生しました:`, pathErr);
+                return [];
+            }
         });
-    } catch(e) { console.error(e); }
+
+        const results = await Promise.all(fetchPromises);
+        results.forEach(dayArray => {
+            flatList = flatList.concat(dayArray);
+        });
+    }
+
+    // ─── 共通データ整形：タイムスタンプを付与し、完全時系列ソート ───
+    fullData = flatList
+        .map(d => ({ ...d, _ts: parseTS(d.date, d.time) }))
+        .sort((a,b)=>a._ts - b._ts);
+        
+    applyFilter();
 }
 
 function applyFilter() {
     const sT = document.getElementById('start').value ? new Date(document.getElementById('start').value).getTime() : 0;
     const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
     let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
+    
+    // 表示上限を最大1,000件（指定範囲内の最新1,000件）に切り出す制限
     const displayList = filtered.slice(-1000); 
     const tbody = document.getElementById('tbl'); let h = '';
     displayList.slice().reverse().forEach(d => {
