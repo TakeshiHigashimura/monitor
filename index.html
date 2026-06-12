@@ -35,8 +35,7 @@
   thead th{position:sticky; top:0; background:#eee; z-index:1; border:1px solid #333; padding:4px;}
   td{border:1px solid #333; padding:3px; text-align:center; font-size:16px; height:35px;}
 </style>
-</head>
-<body>
+</head><body>
 
 <div id="setup-screen" class="setup-overlay">
   <div class="setup-box">
@@ -157,7 +156,7 @@ function loginWithPopup() {
     });
 }
 
-// 🌟【重要】階層構造化対応 ＆ 動的ターゲット条件分岐読込ロジック
+// 🌟【重要修正】日跨ぎバグを完全に修正したデータロード処理
 async function loadData(fetchAll = false) {
     if (!firebase.auth().currentUser) return;
     
@@ -165,7 +164,7 @@ async function loadData(fetchAll = false) {
     const endInput = document.getElementById('end').value;
     let flatList = [];
 
-    // ─── パターンA：期間指定がない場合（当日フォルダのみを正確にピンポイント狙い撃ち） ───
+    // ─── パターンA：期間指定がない場合（前提通り、当日フォルダのみをピンポイント狙い撃ち） ───
     if (!startInput && !endInput) {
         const now = new Date();
         const y = now.getFullYear().toString();
@@ -175,7 +174,6 @@ async function loadData(fetchAll = false) {
         console.log(`[Fetch] 期間未指定のため、本日フォルダのみを高速シークします: /${y}/${m}/${d}`);
         let dbRef = firebase.database().ref(`${y}/${m}/${d}`);
         
-        // 自動モードまたは引数指示がない通常時は最新1000件リミット制限
         if (!fetchAll) dbRef = dbRef.limitToLast(1000);
         
         try {
@@ -188,44 +186,49 @@ async function loadData(fetchAll = false) {
             console.error("[Fetch] 当日データアクセスに失敗しました:", e);
         }
     } 
-    // ─── パターンB：期間指定がある場合（フォルダを跨いで必要日のみ高効率スキャン） ───
+    // ─── パターンB：期間指定がある場合（安全なタイムスタンプ加算による日跨ぎスキャン） ───
     else {
-        const sMS = startInput ? new Date(startInput).getTime() : 0;
-        const eMS = endInput ? new Date(endInput).getTime() : Infinity;
+        // 入力日時の開始日・終了日を純粋な「日付(00:00:00)」ベースに変換して処理する
+        const dStart = startInput ? new Date(startInput) : new Date();
+        const dEnd = endInput ? new Date(endInput) : new Date();
         
-        console.log(`[Fetch] 期間指定あり。フォルダ跨ぎ解析を開始します。 始点:${startInput} 終点:${endInput}`);
+        // 時分秒の端数を切り捨てて、純粋な日付のみにする
+        const sDate = new Date(dStart.getFullYear(), dStart.getMonth(), dStart.getDate());
+        const eDate = new Date(dEnd.getFullYear(), dEnd.getMonth(), dEnd.getDate());
         
-        // ループ走査の安全な基準ミリ秒を決定
-        let currentLoopMS = sMS === 0 ? (eMS === Infinity ? new Date().getTime() : eMS) - (7 * 24 * 60 * 60 * 1000) : sMS; 
-        const maxEndMS = eMS === Infinity ? new Date().getTime() : eMS;
-        
-        // 過大なメモリ・通信バーストを防ぐためのセーフティ（最大スキャン範囲を約31日分にクランプ）
-        const limitLoopMS = Math.min(maxEndMS, currentLoopMS + (31 * 24 * 60 * 60 * 1000));
+        console.log(`[Fetch] 期間指定あり。安全な日跨ぎ解析を開始します: ${startInput} ～ ${endInput}`);
         
         const targetPaths = [];
-        let dLoop = new Date(currentLoopMS);
-        const dEnd = new Date(limitLoopMS);
+        let currentLoop = new Date(sDate.getTime());
         
-        // 1日刻みでカレンダーを進め、走査に必要な『年/月/日』のデータベースパス群を検出
-        while (dLoop <= dEnd) {
-            const y = dLoop.getFullYear().toString();
-            const m = (dLoop.getMonth() + 1).toString().padStart(2, '0');
-            const d = dLoop.getDate().toString().padStart(2, '0');
+        // セーフティ：最大スキャン範囲を31日分に制限
+        const maxEndLimitTime = sDate.getTime() + (31 * 24 * 60 * 60 * 1000);
+        const actualEndTime = Math.min(eDate.getTime(), maxEndLimitTime);
+
+        // 🌟タイムスタンプ（ミリ秒ベース）で確実に1日（86400000ms）ずつ進めることでバグを解消
+        while (currentLoop.getTime() <= actualEndTime) {
+            const y = currentLoop.getFullYear().toString();
+            const m = (currentLoop.getMonth() + 1).toString().padStart(2, '0');
+            const d = currentLoop.getDate().toString().padStart(2, '0');
             const pathStr = `${y}/${m}/${d}`;
-            if (!targetPaths.includes(pathStr)) targetPaths.push(pathStr);
-            dLoop.setDate(dLoop.getDate() + 1);
+            
+            if (!targetPaths.includes(pathStr)) {
+                targetPaths.push(pathStr);
+            }
+            // 24時間分のミリ秒を足して確実に次の日に進める
+            currentLoop.setTime(currentLoop.getTime() + (24 * 60 * 60 * 1000));
         }
         
-        console.log("[Fetch] スキャン対象となる階層フォルダリスト:", targetPaths);
+        console.log("[Fetch] スキャン対象となるクラウド階層フォルダリスト:", targetPaths);
 
-        // リストアップした全日付フォルダへ非同期・並列同時リクエストを投げて高速に回収
+        // Firebaseへの並列分散リクエストにより高速回収
         const fetchPromises = targetPaths.map(async (path) => {
             try {
                 const snap = await firebase.database().ref(path).once('value');
                 const val = snap.val();
                 return val ? Object.values(val) : [];
             } catch(pathErr) {
-                console.warn(`[Fetch] フォルダ [${path}] の読み込みにスキップが発生しました:`, pathErr);
+                console.warn(`[Fetch] クラウドフォルダ [${path}] の読み込みをスキップしました:`, pathErr);
                 return [];
             }
         });
@@ -236,7 +239,7 @@ async function loadData(fetchAll = false) {
         });
     }
 
-    // ─── 共通データ整形：タイムスタンプを付与し、完全時系列ソート ───
+    // ─── 共通データ整形 ───
     fullData = flatList
         .map(d => ({ ...d, _ts: parseTS(d.date, d.time) }))
         .sort((a,b)=>a._ts - b._ts);
@@ -249,7 +252,6 @@ function applyFilter() {
     const eT = document.getElementById('end').value ? new Date(document.getElementById('end').value).getTime() : Infinity;
     let filtered = fullData.filter(d => d._ts >= sT && d._ts <= eT);
     
-    // 表示上限を最大1,000件（指定範囲内の最新1,000件）に切り出す制限
     const displayList = filtered.slice(-1000); 
     const tbody = document.getElementById('tbl'); let h = '';
     displayList.slice().reverse().forEach(d => {
